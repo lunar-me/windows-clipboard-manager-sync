@@ -1,0 +1,267 @@
+import 'package:bloc/bloc.dart';
+import 'package:clipboard/base/bloc/app_config_cubit/app_config_cubit.dart';
+import 'package:clipboard/base/bloc/app_lock_cubit/app_lock_cubit.dart';
+import 'package:clipboard/base/constants/widget_styles.dart';
+import 'package:clipboard/base/domain/model/app_config/appconfig.dart';
+import 'package:clipboard/common/logging.dart';
+import 'package:clipboard/di/di.dart';
+import 'package:clipboard/utils/utility.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:freezed_annotation/freezed_annotation.dart';
+import 'package:injectable/injectable.dart';
+import 'package:screen_retriever/screen_retriever.dart';
+import 'package:universal_io/io.dart';
+import 'package:window_manager/window_manager.dart';
+import 'package:synchronized/extension.dart';
+
+part 'window_action_cubit.freezed.dart';
+part 'window_action_state.dart';
+
+@injectable
+class WindowActionCubit extends Cubit<WindowActionState> {
+  Display? primaryDisplay;
+  bool isCompactMode = false;
+  bool isFocused = false;
+  bool isVisible = true;
+  bool _isPasteStackBackgroundToggleMode = false;
+
+  WindowActionCubit() : super(const WindowActionState.loaded());
+
+  double get displayHeight {
+    if (primaryDisplay != null) {
+      final height =
+          primaryDisplay?.visibleSize?.height ??
+          primaryDisplay!.size.height -
+              (primaryDisplay?.visiblePosition?.dy ?? 0);
+      return height;
+    }
+    return initialWindowSize.height;
+  }
+
+  double get displayWidth {
+    if (primaryDisplay != null) {
+      final width =
+          primaryDisplay?.visibleSize?.width ??
+          primaryDisplay!.size.width -
+              (primaryDisplay?.visiblePosition?.dx ?? 0);
+      return width;
+    }
+    return initialWindowSize.width;
+  }
+
+  Future<void> showInTaskbar(bool show) async {
+    if (!isDesktopPlatform) return;
+    await windowManager.setSkipTaskbar(!show);
+  }
+
+  Future<void> checkFocus() async {
+    if (isDesktopPlatform) {
+      isFocused = await windowManager.isFocused();
+    }
+  }
+
+  Future<bool> checkVisibility() async {
+    if (isDesktopPlatform) {
+      isVisible = await windowManager.isVisible();
+      return isVisible;
+    }
+    return true;
+  }
+
+  Future<void> setupScreenInfo() async {
+    primaryDisplay = await screenRetriever.getPrimaryDisplay();
+    await checkVisibility();
+    checkFocus();
+    emit(const WindowActionState.loaded(loading: false));
+  }
+
+  Future<void> setup(AppView view, [Size? size]) async {
+    if (!isDesktopPlatform) return;
+    await setupScreenInfo();
+    await changeView(view, size);
+  }
+
+  Future<void> changeView(AppView view, [Size? size]) async {
+    await synchronized(() async {
+      await setupScreenInfo();
+      if (view == AppView.windowed) {
+        await setWindowdView(size);
+      } else {
+        await setDockedView(view, size);
+      }
+    });
+  }
+
+  Future<void> alwaysOnTop(bool isAlwaysOnTop) async {
+    if (!isDesktopPlatform) return;
+    await windowManager.setAlwaysOnTop(isAlwaysOnTop);
+    logger.d(() => "Setting Window always on Top: $isAlwaysOnTop");
+  }
+
+  Future<void> focus() async {
+    if (!isDesktopPlatform) return;
+    await windowManager.focus();
+    isFocused = true;
+  }
+
+  Future<void> blur() async {
+    if (!isDesktopPlatform) return;
+    await windowManager.blur();
+    isFocused = false;
+  }
+
+  Future<void> setDockedView(AppView view, [Size? size]) async {
+    if (!isDesktopPlatform) return;
+    assert(view != AppView.windowed, "Only docked views allowed");
+    final paddingRatio = padding10 / displayHeight;
+    final Alignment alignment = switch (view) {
+      AppView.leftDocked => Alignment.centerLeft,
+      AppView.rightDocked => Alignment.topRight,
+      AppView.topDocked => Alignment(0.0, -1.0 + paddingRatio),
+      AppView.bottomDocked => Alignment(0.0, 1.0 - paddingRatio),
+      _ => Alignment.center,
+    };
+
+    final Size dockedMaxSize = switch (view) {
+      AppView.leftDocked ||
+      AppView.rightDocked => Size(dockedLRMaxWidth, displayHeight),
+      AppView.topDocked ||
+      AppView.bottomDocked => Size(displayWidth - padding6, dockedTBMaxHeight),
+      _ => initialWindowSize,
+    };
+
+    final Size dockedMinSize = switch (view) {
+      AppView.leftDocked ||
+      AppView.rightDocked => Size(dockedLRMinWidth, displayHeight),
+      AppView.topDocked ||
+      AppView.bottomDocked => Size(displayWidth - padding6, dockedTBMinHeight),
+      _ => initialWindowSize,
+    };
+
+    if (Platform.isMacOS) await windowManager.setMovable(false);
+    if (Platform.isWindows) {
+      final DockSide side = switch (view) {
+        AppView.leftDocked || AppView.rightDocked => DockSide.left,
+        AppView.topDocked || AppView.bottomDocked || _ => DockSide.right,
+      };
+      await windowManager.dock(side: side, width: 0);
+    }
+    await windowManager.setAsFrameless();
+    await windowManager.setMinimumSize(dockedMinSize);
+    await windowManager.setMaximumSize(dockedMaxSize);
+    await windowManager.setAlwaysOnTop(true);
+    final position = await calcWindowPosition(dockedMinSize, alignment);
+    await windowManager.setSize(dockedMinSize);
+    await windowManager.setPosition(position);
+    emit(state.copyWith(view: view));
+  }
+
+  Future<void> showPasteStackView() async {
+    final openedFromBackground = !isFocused;
+    _isPasteStackBackgroundToggleMode = openedFromBackground;
+
+    final position = await calcWindowPosition(
+      pasteStackWindowSize,
+      Alignment.centerRight,
+    );
+    if (openedFromBackground) {
+      // Hide the window on the right edge of the screen, in the background.
+      final offScreenPosition = Offset(displayWidth + 100, position.dy);
+      await windowManager.setPosition(offScreenPosition, animate: false);
+      await wait(Durations.short4.inMilliseconds);
+    }
+
+    final positionWithOffset = position + stackWindowOffset;
+    await setWindowdView(pasteStackWindowSize, positionWithOffset);
+    await show();
+    await focus();
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.setResizable(false);
+  }
+
+  bool get isPasteStackBackgroundToggleMode =>
+      _isPasteStackBackgroundToggleMode;
+
+  void clearPasteStackBackgroundToggleMode() {
+    _isPasteStackBackgroundToggleMode = false;
+  }
+
+  Future<void> hidePasteStackView({required bool alreadyPinned}) async {
+    final position = await calcWindowPosition(
+      pasteStackWindowSize,
+      Alignment.centerRight,
+    );
+    final offScreenPosition = Offset(displayWidth + 100, position.dy);
+    await windowManager.setPosition(offScreenPosition, animate: true);
+    await wait(Durations.short4.inMilliseconds);
+    await hide();
+    await windowManager.setAlwaysOnTop(alreadyPinned);
+    await windowManager.setResizable(true);
+  }
+
+  Future<void> setWindowdView([Size? size, Offset? position]) async {
+    final isPinned = sl<AppConfigCubit>().state.config.pinned;
+    await windowManager.setMinimumSize(minimumWindowSize);
+    await windowManager.setResizable(true);
+    if (primaryDisplay != null) {
+      await windowManager.setMaximumSize(primaryDisplay!.size);
+    }
+    if (Platform.isMacOS) await windowManager.setMovable(true);
+    if (Platform.isWindows) await windowManager.undock();
+    await windowManager.setAlwaysOnTop(isPinned);
+    await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+    await Future.wait([
+      windowManager.setSize(size ?? initialWindowSize, animate: false),
+      if (position == null)
+        windowManager.center(animate: true)
+      else
+        windowManager.setPosition(position, animate: true),
+    ]);
+    emit(state.copyWith(view: AppView.windowed));
+  }
+
+  Future<void> hide({bool animated = false}) async {
+    isFocused = false;
+    isVisible = false;
+    if (state.view == AppView.windowed) {
+      if (animated && primaryDisplay != null) {
+        final currentPosition = await windowManager.getPosition();
+        windowManager.setPosition(
+          Offset(currentPosition.dx, primaryDisplay?.size.height ?? 600),
+          animate: true,
+        );
+
+        await wait(Durations.short4.inMilliseconds);
+      }
+    }
+    await windowManager.hide();
+  }
+
+  Future<void> show() async {
+    if (isMobilePlatform) return;
+    // Pre-lock before the window becomes visible so the user never sees a
+    // flash of app content. If a lock is needed the state transitions to
+    // AppLockAuthenticating; we wait one frame for it to paint, then show.
+    await windowManager.show();
+    isVisible = true;
+    isFocused = true;
+    requestFocus();
+    await wait(Durations.medium4.inMilliseconds);
+    sl<AppLockCubit>().onAppForeground();
+  }
+
+  Future<void> toggleWindowVisibility() async {
+    if (isFocused) {
+      await hide();
+    } else {
+      await show();
+    }
+  }
+
+  Future<void> requestFocus() async {
+    final pf = FocusManager.instance.primaryFocus;
+    if (pf == null) return;
+    pf.requestFocus();
+  }
+}

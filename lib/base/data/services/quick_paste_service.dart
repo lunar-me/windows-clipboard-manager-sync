@@ -1,0 +1,337 @@
+import 'package:clipboard/base/bloc/offline_persistance_cubit/offline_persistance_cubit.dart';
+import 'package:clipboard/base/bloc/app_config_cubit/app_config_cubit.dart';
+import 'package:clipboard/base/domain/model/clipboard_item/clipboard_item.dart';
+import 'package:clipboard/base/domain/repositories/clipboard.dart';
+import 'package:clipboard/base/domain/services/application_meta_resolver.dart';
+import 'package:clipboard/base/domain/sources/clipboard.dart';
+import 'package:clipboard/base/enums/clip_type.dart';
+import 'package:clipboard/base/enums/sort.dart';
+import 'package:clipboard/common/logging.dart';
+import 'package:clipboard/utils/utility.dart';
+import 'package:flutter/material.dart';
+import 'package:focus_window/focus_window.dart';
+import 'package:injectable/injectable.dart';
+import 'package:path/path.dart' as p;
+import 'package:quick_paste_popup/quick_paste_popup.dart';
+
+/// Service to manage quick paste popup functionality.
+@lazySingleton
+class QuickPasteService {
+  final AppConfigCubit appConfigCubit;
+  final ClipboardRepository repo;
+  final OfflinePersistenceCubit offlinePersistenceCubit;
+  final ApplicationMetaResolver applicationMetaResolver;
+  final FocusWindow focusWindow;
+  final QuickPastePopup _quickPastePopup = QuickPastePopup();
+
+  QuickPasteService(
+    this.appConfigCubit,
+    @Named("local") this.repo,
+    this.offlinePersistenceCubit,
+    this.applicationMetaResolver,
+    this.focusWindow,
+  );
+
+  Future<(List<ClipboardItem>, List<ClipboardItemDto>)> getTopItems({
+    int limit = 10,
+  }) async {
+    try {
+      final pastableItems = <ClipboardItem>[];
+      var totalFetched = 0;
+      var offset = 0;
+      final pageSize = limit.clamp(10, 50);
+      const maxRowsToScan = 200;
+
+      while (pastableItems.length < limit && totalFetched < maxRowsToScan) {
+        final result = await repo.getList(
+          limit: pageSize,
+          offset: offset,
+          order: SortOrder.desc,
+          sortBy: ClipboardSortKey.modified,
+          encrypted: false,
+        );
+
+        final items = result.fold((_) => <ClipboardItem>[], (r) => r.results);
+        if (items.isEmpty) {
+          break;
+        }
+
+        totalFetched += items.length;
+        offset += items.length;
+
+        for (final item in items) {
+          if (item.inCache && !item.encrypted && _canBePasted(item)) {
+            pastableItems.add(item);
+            if (pastableItems.length >= limit) {
+              break;
+            }
+          }
+        }
+
+        if (items.length < pageSize) {
+          break;
+        }
+      }
+
+      if (pastableItems.length > limit) {
+        pastableItems.removeRange(limit, pastableItems.length);
+      }
+
+      if (pastableItems.isEmpty) return (pastableItems, <ClipboardItemDto>[]);
+      final dtos = await Future.wait(pastableItems.map(_convertToDto));
+      logger.d(
+        '[QuickPasteService] Scanned $totalFetched items, ${pastableItems.length} are pastable for quick paste',
+      );
+      return (pastableItems, dtos);
+    } catch (e) {
+      logger.e('[QuickPasteService] getTopItems error: $e');
+      return (<ClipboardItem>[], <ClipboardItemDto>[]);
+    }
+  }
+
+  /// Check if an item has content that can be pasted
+  bool _canBePasted(ClipboardItem item) {
+    if (item.type == ClipItemType.text) {
+      return (item.text?.trim().isNotEmpty ?? false) ||
+          (item.richData?.trim().isNotEmpty ?? false);
+    }
+
+    if (item.type == ClipItemType.url) {
+      return item.url?.trim().isNotEmpty ?? false;
+    }
+
+    if (item.localPath?.trim().isNotEmpty ?? false) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Show the quick paste popup with the top items
+  /// Returns the result of the user interaction
+  Future<QuickPasteResult?> showQuickPastePopup() async {
+    try {
+      // Capture the caret position FIRST, while the target app still has
+      // focus. Once any async work runs CopyCat may become the frontmost
+      // app and the AX query would target CopyCat instead of the editor.
+      await _quickPastePopup.captureCaretContext();
+
+      final targetWindowId = await focusWindow.getActiveWindowId();
+      var (clipItems, dtos) = await getTopItems();
+      logger.d(
+        '[QuickPasteService] Fetched ${dtos.length} items for quick paste popup',
+      );
+
+      final selectionColor = _resolvedQuickPasteSelectionColor().toARGB32();
+      await _quickPastePopup.setTheme(selectionColor: selectionColor);
+      final result = await _quickPastePopup.showQuickPastePopup(items: dtos);
+
+      logger.d(
+        '[QuickPasteService] Popup result selected=${result.selectedItemId} dismissed=${result.dismissed} error=${result.error}',
+      );
+
+      if (!result.dismissed && result.selectedItemId != null) {
+        final pasteError = await _pasteSelectedItem(
+          result.selectedItemId!,
+          clipItems: clipItems,
+          targetWindowId: targetWindowId,
+        );
+        if (pasteError != null) {
+          return QuickPasteResult(
+            selectedItemId: result.selectedItemId,
+            dismissed: result.dismissed,
+            error: pasteError,
+          );
+        }
+      }
+
+      return result;
+    } catch (e) {
+      logger.d('[QuickPasteService] Failed to show quick paste popup: $e');
+      return null;
+    }
+  }
+
+  /// Convert ClipboardItem to ClipboardItemDto for the plugin
+  Future<ClipboardItemDto> _convertToDto(ClipboardItem item) async {
+    final displayText = _displayTextForItem(item);
+    final appIconPath = await _appIconPathForItem(item);
+    final isImage = item.fileMimeType?.startsWith('image') ?? false;
+
+    return ClipboardItemDto(
+      id: item.id?.toString() ?? '',
+      text: displayText.isEmpty ? 'Untitled' : displayText,
+      appIconPath: appIconPath,
+      previewImagePath: isImage ? item.localPath : null,
+      isImage: isImage,
+      fileSize: item.fileSize,
+      fileMimeType: item.fileMimeType,
+      imageBase64: null,
+      copiedAt: item.created,
+    );
+  }
+
+  Future<String?> _pasteSelectedItem(
+    String selectedItemId, {
+    required List<ClipboardItem> clipItems,
+    required int? targetWindowId,
+  }) async {
+    final selectedItem = clipItems
+        .where((e) => e.id?.toString() == selectedItemId)
+        .firstOrNull;
+    if (selectedItem == null) {
+      return 'Selected item no longer exists';
+    }
+
+    if (selectedItem.encrypted || !selectedItem.inCache) {
+      return 'Selected item is not available for paste';
+    }
+
+    if (_shouldUseDirectInsert(selectedItem)) {
+      if (targetWindowId == null) {
+        return 'Unable to restore the target application';
+      }
+
+      await focusWindow.setActiveWindowId(targetWindowId);
+      await wait(const Duration(milliseconds: 80).inMilliseconds);
+
+      final text = _plainTextValue(selectedItem);
+      if (text.isNotEmpty) {
+        final inserted = await _quickPastePopup.insertTextDirect(text);
+        if (inserted) {
+          return null;
+        }
+      }
+    }
+
+    final copied = await offlinePersistenceCubit.copyToClipboard([
+      selectedItem,
+    ]);
+    if (!copied) {
+      return 'Failed to prepare clipboard data for paste';
+    }
+
+    if (targetWindowId == null) {
+      return 'Unable to restore the target application';
+    }
+
+    await focusWindow.setActiveWindowId(targetWindowId);
+    await wait(const Duration(milliseconds: 80).inMilliseconds);
+    await focusWindow.pasteContent();
+    return null;
+  }
+
+  bool _shouldUseDirectInsert(ClipboardItem item) {
+    if (!item.isTextType) {
+      return false;
+    }
+
+    if (item.type == ClipItemType.text &&
+        item.richData?.trim().isNotEmpty == true) {
+      return false;
+    }
+
+    return _plainTextValue(item).isNotEmpty;
+  }
+
+  String _plainTextValue(ClipboardItem item) {
+    if (item.type == ClipItemType.url) {
+      return item.url?.trim() ?? '';
+    }
+    return item.text?.trim() ?? '';
+  }
+
+  String _displayTextForItem(ClipboardItem item) {
+    if (item.localPath != null) {
+      final filePath = item.localPath!.trim();
+      if (filePath.isNotEmpty) {
+        final baseName = p.basename(filePath).trim();
+        if (baseName.isNotEmpty) {
+          return baseName;
+        }
+      }
+
+      final fileName = item.fileName?.trim();
+      if (fileName != null && fileName.isNotEmpty) {
+        return fileName;
+      }
+
+      final fileMimeType = item.fileMimeType?.trim();
+      if (fileMimeType != null && fileMimeType.isNotEmpty) {
+        return fileMimeType;
+      }
+    }
+
+    if (item.type == ClipItemType.url) {
+      final url = item.url?.trim();
+      if (url != null && url.isNotEmpty) {
+        return url;
+      }
+    }
+
+    final normalizedText = (item.text ?? '')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .trim();
+    if (normalizedText.isEmpty) {
+      return '';
+    }
+
+    final compact = normalizedText
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .take(2)
+        .join('\n');
+
+    return compact.length > 140
+        ? '${compact.substring(0, 140).trim()}...'
+        : compact;
+  }
+
+  Future<String?> _appIconPathForItem(ClipboardItem item) async {
+    final sourceId = item.sourceId?.trim() ?? item.sourceApp?.trim();
+    if (sourceId == null || sourceId.isEmpty) {
+      return null;
+    }
+    return await applicationMetaResolver.getIconPathBySourceId(
+      sourceId,
+      sourceOs: item.os,
+    );
+  }
+
+  Color _resolvedQuickPasteSelectionColor() {
+    final config = appConfigCubit.state.config;
+    final themeMode = config.themeMode;
+
+    final scheme = switch (themeMode) {
+      ThemeMode.dark => config.darkThemeColorScheme,
+      ThemeMode.light => config.lightThemeColorScheme,
+      ThemeMode.system =>
+        WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+                Brightness.dark
+            ? config.darkThemeColorScheme
+            : config.lightThemeColorScheme,
+    };
+
+    return scheme.primary;
+  }
+
+  /// Get cursor position (for testing or other use cases)
+  Future<Map<String, double>?> getCursorPosition() async {
+    try {
+      return await _quickPastePopup.getCursorPosition();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Get focused application (for testing or other use cases)
+  Future<Map<String, String>?> getFocusedApp() async {
+    try {
+      return await _quickPastePopup.getFocusedApp();
+    } catch (e) {
+      return null;
+    }
+  }
+}

@@ -1,0 +1,193 @@
+import 'dart:async';
+
+import 'package:clipboard/base/bloc/offline_persistance_cubit/offline_persistance_cubit.dart';
+import 'package:clipboard/base/constants/strings/strings.dart';
+import 'package:clipboard/base/data/services/clipboard_service.dart';
+import 'package:clipboard/base/data/services/notification_service.dart';
+import 'package:clipboard/base/domain/model/notification_message.dart';
+import 'package:clipboard/base/domain/services/analysis/text_analysis.dart';
+import 'package:clipboard/base/l10n/l10n.dart';
+import 'package:clipboard/common/failure.dart';
+import 'package:clipboard/common/logging.dart';
+import 'package:clipboard/routes/routes.dart' show rootNavigationKey;
+import 'package:clipboard/utils/utility.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:path/path.dart' as p;
+import 'package:share_handler/share_handler.dart';
+import "package:universal_io/io.dart";
+
+class ShareListener {
+  StreamSubscription? subscription;
+
+  BuildContext get context => rootNavigationKey.currentContext!;
+  ShareHandlerPlatform get handler => ShareHandlerPlatform.instance;
+
+  void init() {
+    if (!isMobilePlatform) return;
+    dispose();
+    initPlatformState();
+    subscription = handler.sharedMediaStream.listen(
+      (SharedMedia media) async {
+        logger.i(() => "Received shared media: $media");
+
+        try {
+          await putMediaToClipboard(media);
+        } catch (e) {
+          if (context.mounted) {
+            InAppNotificationService.i.notify(
+              NotificationMessage(
+                id: "share_listener_error",
+                body: context.locale.app__unknown_error,
+              ),
+            );
+          }
+        }
+      },
+      onError: (error) {
+        if (context.mounted) {
+          InAppNotificationService.i.notify(
+            NotificationMessage(
+              id: "share_listener_error",
+              body: Failure.fromException(error).message,
+            ),
+          );
+        }
+      },
+    );
+  }
+
+  void dispose() {
+    subscription?.cancel();
+  }
+
+  Future<void> initPlatformState() async {
+    final media = await handler.getInitialSharedMedia();
+    if (media != null) {
+      logger.d(() => "Received initial shared media!");
+      await putMediaToClipboard(media);
+      await handler.resetInitialSharedMedia();
+    }
+  }
+
+  Future<ClipItem?> getFileClipItem(String path, String category) async {
+    final ext = p.extension(path).replaceFirst(".", "");
+    final fileName = p.basenameWithoutExtension(path);
+    final (
+      file,
+      mimeType,
+      size,
+      originalFilePath,
+    ) = await writeToClipboardCacheFile(
+      folder: category,
+      ext: ext,
+      fileName: fileName,
+      file: File(path),
+    );
+    if (file != null) {
+      ClipItem? clip;
+      if (category == "medias") {
+        clip = ClipItem.mediaFile(
+          file: file,
+          mimeType: mimeType ?? "application/octet-stream",
+          fileName: fileName,
+          fileSize: size,
+          originalPathUri: Uri.file(originalFilePath ?? path),
+        );
+      } else {
+        clip = ClipItem.file(
+          file: file,
+          mimeType: mimeType ?? "application/octet-stream",
+          fileName: fileName,
+          fileSize: size,
+          originalPathUri: Uri.file(originalFilePath ?? path),
+        );
+      }
+      return clip;
+    }
+    return null;
+  }
+
+  Future<void> putMediaToClipboard(SharedMedia media) async {
+    final clips = <ClipItem>[];
+
+    if (media.content != null && media.content!.isNotEmpty) {
+      final uri = Uri.tryParse(media.content!);
+
+      final schema = uri?.scheme;
+
+      /// ignore copycat app link
+      if (schema == "clipboard") return;
+
+      final isSupported = supportedUriSchemas.contains(schema);
+
+      if (isSupported && uri != null) {
+        final clip = ClipItem.uri(uri: uri);
+        clips.add(clip);
+      } else {
+        final (category, text) = TextAnalysis.getTextCategory(media.content!);
+        final clip = ClipItem.text(text: text, textCategory: category);
+        clips.add(clip);
+      }
+    }
+    if (media.attachments != null) {
+      for (final attachment in media.attachments!) {
+        await processAttachment(attachment, clips);
+      }
+    }
+    await processImageFilePath(media.imageFilePath, clips);
+
+    if (context.mounted) {
+      showPopActionSnackbar(context, isFile: media.attachments != null);
+      await context.read<OfflinePersistenceCubit>().onClips(
+        clips,
+        manualPaste: true,
+      );
+    }
+  }
+
+  Future<void> processAttachment(
+    SharedAttachment? attachment,
+    List<ClipItem> clips,
+  ) async {
+    if (attachment == null) return;
+    final category = attachment.type == SharedAttachmentType.file
+        ? "files"
+        : "medias";
+    final clip = await getFileClipItem(attachment.path, category);
+    if (clip != null) clips.add(clip);
+  }
+
+  Future<void> processImageFilePath(
+    String? imageFilePath,
+    List<ClipItem> clips,
+  ) async {
+    if (imageFilePath == null) return;
+    final clip = await getFileClipItem(imageFilePath, "medias");
+    if (clip != null) clips.add(clip);
+  }
+
+  void showPopActionSnackbar(BuildContext context, {bool isFile = false}) {
+    if (Platform.isAndroid) {
+      // showTextSnackbar(
+      //   context.locale.app__ack__done,
+      //   closePrevious: true,
+      //   duration: isFile ? 15 : 5,
+      //   isProgress: true,
+      //   action: SnackBarAction(
+      //     label: context.locale.app__ack__quit_app,
+      //     onPressed: () {
+      //       SystemNavigator.pop(animated: true);
+      //     },
+      //   ),
+      // );
+
+      InAppNotificationService.i.notify(
+        NotificationMessage(
+          id: "share_listener_success",
+          body: context.locale.app__ack__done,
+        ),
+      );
+    }
+  }
+}

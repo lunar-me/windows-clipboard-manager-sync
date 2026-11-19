@@ -1,0 +1,39 @@
+import 'package:clipboard/di/di.dart';
+import 'package:clipboard/base/bloc/clip_collection_cubit/clip_collection_cubit.dart';
+import 'package:clipboard/base/bloc/collection_clips_cubit/collection_clips_cubit.dart';
+import 'package:clipboard/base/domain/model/clip_collection/clipcollection.dart';
+import 'package:clipboard/widgets/yarn_ball_loading.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+class ClipCollectionProvider extends StatelessWidget {
+  final int collectionId;
+  final Widget Function(BuildContext context, ClipCollection collection)
+  builder;
+  const ClipCollectionProvider({
+    super.key,
+    required this.collectionId,
+    required this.builder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final collection = context.read<ClipCollectionCubit>().get(
+      collectionId,
+      null,
+    );
+
+    return FutureBuilder(
+      future: collection,
+      builder: (BuildContext context, AsyncSnapshot snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: YarnBallLoading());
+        }
+        return BlocProvider<CollectionClipsCubit>(
+          create: (context) => sl(param1: snapshot.data)..fetch(),
+          child: builder(context, snapshot.data),
+        );
+      },
+    );
+  }
+}

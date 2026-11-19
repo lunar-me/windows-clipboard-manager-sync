@@ -1,0 +1,45 @@
+import 'package:clipboard/base/domain/model/subscription/subscription.dart';
+import 'package:clipboard/utils/utility.dart';
+import 'package:purchases_ui_flutter/purchases_ui_flutter.dart';
+
+Future<void> presentPaywall() async {
+  await RevenueCatUI.presentPaywall(displayCloseButton: true);
+}
+
+Subscription generateFreePlan(String userId) {
+  return Subscription(
+    created: systemTime(),
+    modified: systemTime(),
+    userId: userId,
+    planName: "Core",
+    subId: "",
+    source: "",
+  );
+}
+
+Subscription generateProPlan(
+  String userId,
+  DateTime activeTill, [
+  bool isPromo = false,
+  String? managementUrl,
+]) {
+  return Subscription(
+    created: systemTime(),
+    modified: systemTime(),
+    userId: userId,
+    planName: "Pro",
+    subId: "",
+    source: isPromo ? "PROMO" : "",
+    activeTill: activeTill,
+    ads: false,
+    collections: 50,
+    itemsPerCollection: 500,
+    dragNdrop: true,
+    theming: true,
+    syncHours: 720,
+    syncInterval: 5,
+    maxSyncDevices: 12,
+    managementUrl: managementUrl,
+    customExclusionRules: true,
+  );
+}

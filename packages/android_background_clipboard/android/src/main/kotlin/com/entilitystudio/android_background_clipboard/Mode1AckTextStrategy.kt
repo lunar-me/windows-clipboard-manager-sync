@@ -1,0 +1,270 @@
+package com.entilitystudio.android_background_clipboard
+
+import android.content.Context
+import android.os.SystemClock
+import android.util.Log
+import android.view.accessibility.AccessibilityEvent
+
+/**
+ * Mode 1: Ack-text based clipboard detection.
+ * 
+ * Detects copy events by monitoring for OS acknowledgement toast/announcement text.
+ * During initial setup, simulates a copy to record the ack text, then matches that text
+ * on subsequent accessibility events.
+ * 
+ * Low battery overhead but depends on OEM providing standard copy feedback.
+ */
+open class Mode1AckTextStrategy(
+    protected val context: Context,
+    initialAckText: String? = null,
+    protected val onAckTextLearned: ((String) -> Unit)? = null,
+) : ClipboardDetectionStrategy() {
+    override val mode: ClipboardDetectionMode = ClipboardDetectionMode.MODE_1_ACK_TEXT
+
+    protected open val logTag: String = "Mode1AckTextStrategy"
+    protected open val duplicateSuppressionWindowMs: Long = 900L
+    private val defaultAckText = "[Copied]"
+    protected var notificationAckText: String =
+        initialAckText?.trim()?.takeIf { it.isNotEmpty() } ?: defaultAckText
+    protected var hasLearnedAckText: Boolean = !initialAckText.isNullOrBlank()
+    protected var isInDetectionTest: Boolean = false
+    protected var currentCallback: ClipboardDetectionCallback? = null
+    protected var lastCopyDetectedAtMs: Long = 0L
+
+    protected fun getActionKeywords(): Set<String> {
+        return ClipboardLocalizationHelper.getActionKeywords(context, notificationAckText)
+    }
+
+    override fun onAccessibilityEvent(
+        event: AccessibilityEvent?,
+        packageName: String,
+        isScreenOn: Boolean,
+        isAppInForeground: Boolean,
+        callback: ClipboardDetectionCallback
+    ) {
+        if (event == null) return
+
+        try {
+            // During setup we must process test events even if app is foreground.
+            if (isInDetectionTest) {
+                // Use the callback passed to startDetectionTest so service can complete setup.
+                handleTestAckEvent(event, currentCallback ?: callback)
+                return
+            }
+
+            // Early exit if screen is off or CopyCat is in foreground
+            if (!isScreenOn || isAppInForeground) {
+                debugLog(logTag) { "Ignoring event: screen=$isScreenOn, appInFg=$isAppInForeground" }
+                return
+            }
+
+            // Handle normal copy detection events
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                    handleWindowStateChangedEvent(event, packageName, callback)
+                }
+                AccessibilityEvent.TYPE_ANNOUNCEMENT -> {
+                    handleAnnouncementEvent(event, packageName, callback)
+                }
+                AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                    handleNotificationStateChangedEvent(event, packageName, callback)
+                }
+                else -> {
+                    // Ignore other event types
+                }
+            }
+        } catch (t: Throwable) {
+            Log.e(logTag, "Suppressed exception in Mode1 onAccessibilityEvent: ${t.message}", t)
+        }
+    }
+
+    override fun startDetectionTest(probeText: String, callback: ClipboardDetectionCallback) {
+        debugLog(logTag) { "Starting detection test" }
+        isInDetectionTest = true
+        currentCallback = callback
+    }
+
+    override fun acceptDetectionTestAckText(ackText: String) {
+        val normalizedAckText = ackText.trim()
+        if (normalizedAckText.isEmpty()) {
+            return
+        }
+
+        notificationAckText = normalizedAckText
+        hasLearnedAckText = true
+        onAckTextLearned?.invoke(normalizedAckText)
+    }
+
+    override fun requiresDetectionTest(): Boolean = !hasLearnedAckText
+
+    override fun completeDetectionTest() {
+        debugLog(logTag) { "Completed detection test. Ack text: '$notificationAckText'" }
+        clearDetectionTestState()
+    }
+
+    override fun reset() {
+        clearDetectionTestState()
+        lastCopyDetectedAtMs = 0L
+    }
+
+    override fun shutdown() {
+        reset()
+    }
+
+    // MARK: Protected helpers
+    
+    protected open fun handleWindowStateChangedEvent(
+        event: AccessibilityEvent,
+        packageName: String,
+        callback: ClipboardDetectionCallback
+    ) {
+        runCatching {
+            val eventPkg = event.packageName?.toString().orEmpty()
+            val eventCls = event.className?.toString().orEmpty()
+            // Skip systemui announcements unless we're in detection test
+            if (eventPkg != "com.android.systemui" ||
+                eventCls != "android.widget.FrameLayout" ||
+                event.text.isEmpty()
+            ) {
+                return
+            }
+
+            val fullText = event.text.joinToString(" ")
+            debugLog(logTag) { "Ack TEXT: $fullText" }
+
+            val ackTextSplit = fullText.split(",")
+            // If the text has multiple parts (e.g. "<content>, Copied"), use the last part.
+            // If it's a single part, the text itself is the ack (e.g. real copy fires just "Copied").
+            val ackText = if (ackTextSplit.size > 1) ackTextSplit.last().trim() else fullText.trim()
+
+            val copyDetected = (ackText == notificationAckText.trim()) ||
+                notificationAckText.isBlank() ||
+                ClipboardLocalizationHelper.containsActionKeyword(ackText, getActionKeywords())
+
+            if (copyDetected && shouldEmitCopy()) {
+                debugLog(logTag) { "Copy detected via window state change" }
+                callback.onCopyDetected(packageName)
+            }
+        }.onFailure { e ->
+            Log.w(logTag, "Error in handleWindowStateChangedEvent: ${e.message}")
+        }
+    }
+
+    protected open fun handleAnnouncementEvent(
+        event: AccessibilityEvent,
+        packageName: String,
+        callback: ClipboardDetectionCallback
+    ) {
+        runCatching {
+            val ackText = event.text.joinToString(" ")
+            val copyDetected = ackText.trim() == notificationAckText.trim() ||
+                ClipboardLocalizationHelper.containsActionKeyword(ackText, getActionKeywords()) ||
+                ClipboardLocalizationHelper.containsActionKeyword(event.text, getActionKeywords())
+
+            if (copyDetected && shouldEmitCopy()) {
+                debugLog(logTag) { "Copy detected via announcement" }
+                val resolvedPackage = packageName.ifEmpty { event.packageName?.toString().orEmpty() }
+                callback.onCopyDetected(resolvedPackage)
+            }
+        }.onFailure { e ->
+            Log.w(logTag, "Error in handleAnnouncementEvent: ${e.message}")
+        }
+    }
+
+    protected open fun handleNotificationStateChangedEvent(
+        event: AccessibilityEvent,
+        packageName: String,
+        callback: ClipboardDetectionCallback
+    ) {
+        runCatching {
+            if (event.className?.toString() != "android.widget.Toast") return
+
+            debugLog(logTag) { "Toast Event: $event" }
+            val ackText = event.text.joinToString(" ")
+            val copyDetected = ackText.trim() == notificationAckText.trim() ||
+                ClipboardLocalizationHelper.containsActionKeyword(ackText, getActionKeywords()) ||
+                ClipboardLocalizationHelper.containsActionKeyword(event.text, getActionKeywords())
+
+            val eventPkg = event.packageName?.toString().orEmpty()
+            val isAcceptedPackage = eventPkg.contains("android") ||
+                eventPkg == "com.android.systemui" ||
+                (packageName.isNotEmpty() && eventPkg == packageName)
+
+            if (copyDetected && isAcceptedPackage && shouldEmitCopy()) {
+                debugLog(logTag) { "Copy detected via toast notification from $eventPkg" }
+                val resolvedPackage = packageName.ifEmpty { eventPkg }
+                callback.onCopyDetected(resolvedPackage)
+            }
+        }.onFailure { e ->
+            Log.w(logTag, "Error in handleNotificationStateChangedEvent: ${e.message}")
+        }
+    }
+
+    protected open fun handleTestAckEvent(event: AccessibilityEvent, callback: ClipboardDetectionCallback) {
+        runCatching {
+            val eventText = event.text.joinToString(" ").trim()
+            if (eventText.isBlank()) return
+
+            val ackCandidate = when (event.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
+                    extractWindowStateAckCandidate(event, eventText)
+
+                AccessibilityEvent.TYPE_ANNOUNCEMENT -> eventText
+
+                AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                    if (event.className?.toString() == "android.widget.Toast") {
+                        eventText
+                    } else {
+                        null
+                    }
+                }
+
+                else -> null
+            } ?: return
+
+            debugLog(logTag) { "Detected ack candidate: '$ackCandidate'" }
+            callback.onTestAckCandidate(ackCandidate)
+        }.onFailure { e ->
+            Log.w(logTag, "Error in handleTestAckEvent: ${e.message}")
+        }
+    }
+
+    protected open fun extractWindowStateAckCandidate(
+        event: AccessibilityEvent,
+        eventText: String
+    ): String? {
+        val eventPkg = event.packageName?.toString().orEmpty()
+        val eventCls = event.className?.toString().orEmpty()
+        if (eventPkg != "com.android.systemui" ||
+            eventCls != "android.widget.FrameLayout" ||
+            event.text.isEmpty()
+        ) {
+            return null
+        }
+
+        val separatorIndex = eventText.lastIndexOf(',')
+        val ackText = if (separatorIndex == -1) {
+            eventText.trim()
+        } else {
+            eventText.substring(separatorIndex + 1).trim()
+        }
+
+        return ackText.takeIf { it.isNotBlank() }
+    }
+
+    protected open fun clearDetectionTestState() {
+        isInDetectionTest = false
+        currentCallback = null
+    }
+
+    protected open fun shouldEmitCopy(): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastCopyDetectedAtMs < duplicateSuppressionWindowMs) {
+            debugLog(logTag) { "Suppressing duplicate copy detection" }
+            return false
+        }
+
+        lastCopyDetectedAtMs = now
+        return true
+    }
+}

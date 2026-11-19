@@ -1,0 +1,74 @@
+const kLocalUserId = "local_user";
+const klocalAuthKey = "auth__user_local_signed_in";
+
+const supportedUriSchemas = {
+  "http",
+  "https",
+  "ftp",
+  "file",
+  "mailto",
+  "tel",
+  "data",
+  "ws",
+  "wss",
+  "ldap",
+  "urn",
+  "git",
+  "ssh",
+  "irc",
+  "news",
+};
+
+const macAppcastUrl = String.fromEnvironment("MACOS_UPGRADE_APPCAST_URL");
+const windowsAppcastUrl = String.fromEnvironment("WINDOWS_UPGRADE_APPCAST_URL");
+const linuxAppcastUrl = String.fromEnvironment("LINUX_UPGRADE_APPCAST_URL");
+
+const devMacAppcastUrl = String.fromEnvironment(
+  "DEV_MACOS_UPGRADE_APPCAST_URL",
+);
+const devWindowsAppcastUrl = String.fromEnvironment(
+  "DEV_WINDOWS_UPGRADE_APPCAST_URL",
+);
+const devLinuxAppcastUrl = String.fromEnvironment(
+  "DEV_LINUX_UPGRADE_APPCAST_URL",
+);
+
+const tutorialsUrl = String.fromEnvironment("TUTORIALS_URL");
+const githubUrl = String.fromEnvironment("GITHUB_URL");
+const websiteUrl = String.fromEnvironment("WEBSITE_URL");
+const youtubePlaylistUrl = String.fromEnvironment("YOUTUBE_PLAYLIST_URL");
+const supportUrl = String.fromEnvironment("SUPPORT_URL");
+const discordUrl = String.fromEnvironment("DISCORD_URL");
+const downloadUrl = String.fromEnvironment("DOWNLOAD_URL");
+const smartPasteDemoVideo = String.fromEnvironment("SMART_PASTE_DEMO_VIDEO");
+const keyboardShortcutDemoVideo = String.fromEnvironment(
+  "KEYBOARD_SHORTCUT_DEMO_VIDEO",
+);
+
+const googleOAuthClientID = String.fromEnvironment("GOOGLE_OAUTH_CLIENT_ID");
+
+const revenueCatAndroidPublicKey = String.fromEnvironment(
+  "REVENUECAT_ANDROID_PUB_KEY",
+);
+const revenueCatApplePublicKey = String.fromEnvironment(
+  "REVENUECAT_APPLE_PUB_KEY",
+);
+
+const iosAppStoreId = String.fromEnvironment("IOS_APP_STORE_ID");
+const microsoftStoreId = String.fromEnvironment("MICROSOFT_STORE_ID");
+
+const dbName = String.fromEnvironment(
+  "DEFAULT_DATABASE_LOCATION",
+  defaultValue: "windows-clipboard-manager-sync-DB",
+);
+
+// system env variable keys
+const dbPathEnvKey = "COPYCAT_DB_ROOT";
+
+/// Font family for code/monospaced text
+const jetBrainsMonoFont = "JetBrainsMono";
+
+const privacyPolicyUrl = String.fromEnvironment("PRIVACY_POLICY_URL");
+const termsConditionsUrl = String.fromEnvironment("TERMS_CONDITIONS_URL");
+
+const defaultWebDavBasePath = "/.CopyCat/media";

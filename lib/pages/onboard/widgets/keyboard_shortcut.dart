@@ -1,0 +1,57 @@
+import 'package:animate_do/animate_do.dart';
+import 'package:clipboard/base/constants/strings/strings.dart';
+import 'package:clipboard/base/constants/widget_styles.dart';
+import 'package:clipboard/base/l10n/l10n.dart';
+import 'package:clipboard/pages/settings/widgets/switches/clipboard_hotkey_switch.dart';
+import 'package:clipboard/utils/common_extension.dart';
+import 'package:clipboard/widgets/video_players/adaptive_video_player.dart';
+import 'package:flutter/material.dart';
+import 'package:universal_io/io.dart';
+
+class KeyboardShortcutStep extends StatelessWidget {
+  final VoidCallback onContinue;
+  const KeyboardShortcutStep({super.key, required this.onContinue});
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = context.textTheme;
+    return ZoomIn(
+      duration: Durations.short2,
+      child: Center(
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Platform.isMacOS
+                    ? Icons.keyboard_command_key_rounded
+                    : Icons.window,
+                size: 32,
+              ),
+              height10,
+              Text(
+                "Clipboard Shortcut",
+                textAlign: TextAlign.center,
+                style: textTheme.headlineMedium,
+              ),
+              height10,
+              const AdaptiveVideoPlayer(
+                width: 620,
+                borderRadius: radius16,
+                url: keyboardShortcutDemoVideo,
+              ),
+              height10,
+              const SizedBox(width: 620, child: ClipboardHotKeySwitch()),
+              height10,
+              FilledButton(
+                onPressed: onContinue,
+                child: Text(context.mlocale.continueButtonLabel.title),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,85 @@
+import 'package:clipboard/base/constants/widget_styles.dart';
+import 'package:clipboard/base/l10n/l10n.dart';
+import 'package:clipboard/pages/settings/pages/android_bg_clipboard/bullet_point.dart';
+import 'package:clipboard/utils/common_extension.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+class AccessibilityServiceNotice extends StatelessWidget {
+  const AccessibilityServiceNotice({super.key});
+
+  Future<bool> show(BuildContext context) async {
+    return await showDialog<bool>(context: context, builder: (_) => this) ??
+        false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = context.textTheme;
+
+    final title = Text(context.locale.abc__accessibility_perm_alert__title);
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      spacing: 16.0,
+      children: <Widget>[
+        Text(context.locale.abc__accessibility_perm_alert__subtitle),
+        Padding(
+          padding: const EdgeInsets.only(left: padding10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              BulletPoint(
+                prefix: context.locale.abc__accessibility_perm_alert__p1_prefix,
+                boldText: context.locale.abc__accessibility_perm_alert__p1_bold,
+                suffix: context.locale.abc__accessibility_perm_alert__p1_suffix,
+              ),
+              BulletPoint(
+                prefix: context.locale.abc__accessibility_perm_alert__p2_prefix,
+                boldText: context.locale.abc__accessibility_perm_alert__p2_bold,
+                suffix: context.locale.abc__accessibility_perm_alert__p2_suffix,
+              ),
+              BulletPoint(
+                prefix: context.locale.abc__accessibility_perm_alert__p3_prefix,
+                boldText: context.locale.abc__accessibility_perm_alert__p3_bold,
+                suffix: context.locale.abc__accessibility_perm_alert__p3_suffix,
+              ),
+              BulletPoint(
+                prefix: context.locale.abc__accessibility_perm_alert__p4_prefix,
+                boldText: context.locale.abc__accessibility_perm_alert__p4_bold,
+                suffix: context.locale.abc__accessibility_perm_alert__p4_suffix,
+              ),
+              BulletPoint(
+                prefix: context.locale.abc__accessibility_perm_alert__p5_prefix,
+                boldText: context.locale.abc__accessibility_perm_alert__p5_bold,
+                suffix: context.locale.abc__accessibility_perm_alert__p5_suffix,
+              ),
+            ],
+          ),
+        ),
+        Text(
+          context.locale.abc__accessibility_perm_alert__agree,
+          style: textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
+    final actions = [
+      TextButton(
+        onPressed: () => context.pop(false),
+        child: Text(context.locale.settings__device_mgmt__dialog_cancel),
+      ),
+      ElevatedButton.icon(
+        icon: const Icon(Icons.settings_rounded),
+        onPressed: () => context.pop(true),
+        label: Text(context.locale.abc__perm_alert_open_setting__button),
+      ),
+    ];
+
+    return AlertDialog(
+      icon: const Icon(Icons.accessibility_new_rounded),
+      title: title,
+      content: content,
+      actions: actions,
+    );
+  }
+}

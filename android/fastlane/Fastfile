@@ -1,0 +1,100 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+default_platform(:android)
+
+platform :android do
+  PLAYSTORE_INTERNAL_TRACK = "internal"
+
+  private_lane :validate_metadata do
+    version_code = File.read("../../pubspec.yaml").match(/\+(\d+)/)[1]
+
+    required_locales = %w[
+      de-DE
+      en-US
+      es-ES
+      fr-FR
+      pt-PT
+      zh-CN
+    ]
+
+    required_locales.each do |locale|
+      changelog = "./fastlane/metadata/android/#{locale}/changelogs/#{version_code}.txt"
+
+      unless File.exist?(changelog)
+        UI.user_error!("Missing changelog: #{changelog}")
+      end
+    end
+  end
+
+  private_lane :playstore_tracker do |options|
+    track = options[:track] || PLAYSTORE_BETA_TESTER_TRACK
+
+    pubspec = File.read("../../pubspec.yaml")
+    current_version_code = pubspec.match(/\+(\d+)/)[1].to_i
+
+    latest_version_codes =
+      google_play_track_version_codes(track: track)
+
+    UI.message("Track: #{track}")
+    UI.message("🟡 Current version code: #{current_version_code}")
+    UI.message("🟢 Latest version codes on Play Store: #{latest_version_codes}")
+
+    if latest_version_codes.include?(current_version_code)
+      UI.user_error!(
+        "Build number #{current_version_code} already exists on #{track}."
+      )
+    end
+  end
+
+  desc "Runs all the tests"
+  lane :test do
+    gradle(task: "test")
+    sh "flutter test"
+  end
+
+  # MARK: - Deployment lanes
+  # Call it like this: `fastlane android play_testers track:internal` or `fastlane android play_testers track:'Beta Testers'`
+  desc "Deploy to Google Play Internal"
+  lane :play_testers do |options|
+    track = options[:track] || PLAYSTORE_INTERNAL_TRACK
+    sh "flutter clean"
+    sh "flutter pub get"
+
+    if track == PLAYSTORE_INTERNAL_TRACK
+      UI.important("Deploying to Internal Track")
+    else
+      UI.important("Deploying to #{track} Track")
+      validate_metadata # enable for strict metadata validation
+    end
+    
+    playstore_tracker(track: track)
+
+    sh "flutter build appbundle \
+      --release \
+      --dart-define-from-file=local/prod.json \
+      --obfuscate \
+      --split-debug-info=build_symbols"
+
+    upload_to_play_store(
+      track: track,
+      aab: "../build/app/outputs/bundle/release/app-release.aab",
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
+    )
+  end
+end

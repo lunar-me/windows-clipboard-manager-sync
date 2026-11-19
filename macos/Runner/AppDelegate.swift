@@ -1,0 +1,59 @@
+import Cocoa
+import FlutterMacOS
+import app_links
+
+@main
+class AppDelegate: FlutterAppDelegate {
+
+  override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+    return true
+  }
+
+  override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    return false
+  }
+
+  override func application(
+    _ application: NSApplication,
+    continue userActivity: NSUserActivity,
+    restorationHandler: @escaping ([NSUserActivityRestoring]) -> Void) -> Bool {
+
+    guard let url = AppLinks.shared.getUniversalLink(userActivity) else {
+      return false
+    }
+    
+    AppLinks.shared.handleLink(link: url.absoluteString)
+    
+    return false // Returning true will stop the propagation to other packages
+  }
+
+  override func applicationDidFinishLaunching(_ notification: Notification) {
+    if !isSingleInstance() {
+      NSApplication.shared.terminate(self)
+    }
+  }
+
+  override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+    for window in sender.windows {
+      if !window.isVisible {
+        window.setIsVisible(true)
+        window.makeKeyAndOrderFront(self)
+      }
+    }
+    NSApp.activate(ignoringOtherApps: true)
+    return true
+  }
+
+  private func isSingleInstance() -> Bool {
+    let runningApps = NSWorkspace.shared.runningApplications
+    let currentApp = NSRunningApplication.current
+
+    for app in runningApps {
+      if app.bundleIdentifier == currentApp.bundleIdentifier && app.processIdentifier != currentApp.processIdentifier {
+        app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        return false
+      }
+    }
+    return true
+  }
+}

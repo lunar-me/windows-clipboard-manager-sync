@@ -1,0 +1,105 @@
+import 'package:clipboard/base/bloc/offline_persistance_cubit/offline_persistance_cubit.dart';
+import 'package:clipboard/base/constants/strings/route_constants.dart';
+import 'package:clipboard/base/constants/widget_styles.dart';
+import 'package:clipboard/base/domain/model/clipboard_item/clipboard_item.dart';
+import 'package:clipboard/base/l10n/l10n.dart';
+import 'package:clipboard/utils/common_extension.dart';
+import 'package:clipboard/utils/utility.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+
+class CreateClipNotePage extends StatefulWidget {
+  final ClipboardItem? item;
+
+  const CreateClipNotePage({super.key, this.item});
+
+  @override
+  State<CreateClipNotePage> createState() => _CreateClipNotePageState();
+}
+
+class _CreateClipNotePageState extends State<CreateClipNotePage> {
+  late final TextEditingController controller;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = TextEditingController(text: widget.item?.text);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> save() async {
+    final note = controller.text;
+    final cubit = context.read<OfflinePersistenceCubit>();
+
+    if (note.isNotEmpty && widget.item != null) {
+      final item = widget.item!.copyWith(text: note, modified: systemTime());
+      await cubit.persist([item]);
+      if (!mounted) return;
+      context.pop(item);
+    } else {
+      context.pop();
+    }
+  }
+
+  Future<void> saveAsNew() async {
+    final note = controller.text;
+    final cubit = context.read<OfflinePersistenceCubit>();
+    if (note.isNotEmpty) await cubit.paste(note);
+    if (!mounted) return;
+    context.goNamed(RouteConstants.home);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colors;
+    return Scaffold(
+      appBar: AppBar(
+        title: widget.item == null
+            ? Text(context.locale.create_clip__appbar__title__new)
+            : Text(context.locale.create_clip__appbar__title__edit),
+        centerTitle: false,
+        leading: const CloseButton(),
+        backgroundColor: colors.secondaryContainer,
+        actions: [
+          IconButton(
+            icon: widget.item == null
+                ? const Icon(Icons.save)
+                : const Icon(Icons.note_add_rounded),
+            onPressed: widget.item == null ? saveAsNew : save,
+            tooltip: widget.item == null
+                ? context.mlocale.saveButtonLabel.title
+                : context.locale.create_clip__button__save_new,
+          ),
+          if (widget.item != null)
+            IconButton(
+              icon: const Icon(Icons.check_rounded),
+              onPressed: save,
+              tooltip: context.mlocale.saveButtonLabel.title,
+            ),
+          width10,
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(padding10),
+        child: TextField(
+          scrollPadding: const EdgeInsets.all(padding10),
+          maxLines: null,
+          minLines: 100,
+          controller: controller,
+          autofocus: true,
+          cursorColor: colors.primary,
+          decoration: InputDecoration(
+            border: InputBorder.none,
+            hintText: context.locale.create_clip__input__hint,
+          ),
+        ),
+      ),
+    );
+  }
+}

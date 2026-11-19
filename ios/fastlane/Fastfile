@@ -1,0 +1,89 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+
+require 'dotenv'
+
+Dotenv.load(File.expand_path('../../local/fastlane/.env', __dir__))
+
+ENV['FASTLANE_USER'] ||= ENV['FASTLANE_APPLE_ID']
+ENV['APP_IDENTIFIER'] ||= ENV['FASTLANE_APP_IDENTIFIER']
+ENV['APPLE_ID'] ||= ENV['FASTLANE_APPLE_ID']
+ENV['APPLE_APP_SPECIFIC_PASSWORD'] ||= ENV['FASTLANE_APPLE_APP_SPECIFIC_PASSWORD']
+ENV['FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD'] ||= ENV['FASTLANE_APPLE_APP_SPECIFIC_PASSWORD']
+ENV['APP_SPECIFIC_PASSWORD'] ||= ENV['FASTLANE_APPLE_APP_SPECIFIC_PASSWORD']
+
+default_platform(:ios)
+
+platform :ios do
+  PROJECT_ROOT = File.expand_path("../..", __dir__)
+
+  private_lane :prepare_ios_dependencies do
+    ios_dir = File.expand_path("..", __dir__)
+    ruby_env = "env -u GEM_HOME -u GEM_PATH -u BUNDLE_GEMFILE -u BUNDLE_BIN_PATH"
+
+    sh "flutter clean"
+    sh "flutter pub get"
+    sh "cd '#{ios_dir}' && #{ruby_env} pod install"
+  end
+
+  desc "Runs all the tests"
+  lane :test do
+    sh "flutter test"
+  end
+
+  # MARK: - Deployment lanes
+  desc "Build and upload to TestFlight"
+  lane :beta_testers do
+    prepare_ios_dependencies
+
+    sh "env -u GEM_HOME -u GEM_PATH -u BUNDLE_GEMFILE -u BUNDLE_BIN_PATH flutter build ipa \
+      --release \
+      --dart-define-from-file=local/prod.json \
+      --obfuscate \
+      --split-debug-info=build_symbols"
+
+    ipa_glob = File.join(PROJECT_ROOT, "build", "ios", "ipa", "*.ipa")
+    ipa_path = Dir[ipa_glob].max_by { |f| File.mtime(f) }
+
+    if ipa_path.nil?
+      UI.user_error!("No IPA found in #{ipa_glob}")
+    end
+
+    upload_to_testflight(
+      ipa: ipa_path,
+      skip_waiting_for_build_processing: true
+    )
+  end
+
+  desc "Build and upload for App Store review"
+  lane :release do
+    prepare_ios_dependencies
+    sh "env -u GEM_HOME -u GEM_PATH -u BUNDLE_GEMFILE -u BUNDLE_BIN_PATH flutter build ipa \
+      --config-only \
+      --release \
+      --dart-define-from-file=local/prod.json \
+      --obfuscate \
+      --split-debug-info=./build_symbols"
+    sh "env -u GEM_HOME -u GEM_PATH -u BUNDLE_GEMFILE -u BUNDLE_BIN_PATH flutter build ipa \
+      --release \
+      --dart-define-from-file=local/prod.json \
+      --obfuscate \
+      --split-debug-info=build_symbols"
+
+    ipa_glob = File.join(PROJECT_ROOT, "build", "ios", "ipa", "*.ipa")
+    ipa_path = Dir[ipa_glob].max_by { |f| File.mtime(f) }
+
+    if ipa_path.nil?
+      UI.user_error!("No IPA found in #{ipa_glob}")
+    end
+
+    upload_to_app_store(
+      ipa: ipa_path,
+      submit_for_review: false,
+      automatic_release: false,
+      skip_screenshots: true,
+      skip_metadata: true,
+      skip_app_version_update: true
+    )
+  end
+end

@@ -1,0 +1,33 @@
+import 'package:clipboard/base/constants/strings/route_constants.dart';
+import 'package:clipboard/base/l10n/l10n.dart';
+import 'package:clipboard/widgets/badges.dart';
+import 'package:clipboard/widgets/subscription/subscription_builder.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+class ExcludeCustomRules extends StatelessWidget {
+  final bool enabled;
+  const ExcludeCustomRules({super.key, this.enabled = true});
+
+  Future<void> navigateTo(BuildContext context) async {
+    context.goNamed(RouteConstants.customExclusionRules);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return HasAccessToFeature(
+      hasAccess: (subscription) => subscription.customExclusionRules,
+      builder: (context, hasAccess, _) {
+        return ListTile(
+          title: ProBadge(
+            child: Text(context.locale.settings__tile__cer_title),
+          ),
+          subtitle: Text(context.locale.settings__tile__cer_subtitle),
+          enabled: enabled && hasAccess,
+          trailing: const Icon(Icons.keyboard_arrow_right_rounded),
+          onTap: hasAccess && enabled ? () => navigateTo(context) : null,
+        );
+      },
+    );
+  }
+}

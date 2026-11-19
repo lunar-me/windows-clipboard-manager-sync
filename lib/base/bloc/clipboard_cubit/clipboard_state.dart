@@ -1,0 +1,16 @@
+part of 'clipboard_cubit.dart';
+
+@freezed
+abstract class ClipboardState with _$ClipboardState {
+  const factory ClipboardState.loaded({
+    @Default(0) int revision,
+    @Default('') String query,
+    @Default(true) hasMore,
+    @Default(50) int limit,
+    @Default(0) int offset,
+    @Default(true) bool loading,
+    @Default(false) bool syncing,
+    @Default(SearchFilterState()) SearchFilterState filterState,
+    Failure? failure,
+  }) = ClipboardLoadedState;
+}

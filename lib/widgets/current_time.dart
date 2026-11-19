@@ -1,0 +1,56 @@
+import 'dart:async';
+
+import 'package:clipboard/base/constants/widget_styles.dart';
+import 'package:clipboard/base/l10n/l10n.dart';
+import 'package:clipboard/utils/utility.dart';
+import 'package:flutter/material.dart';
+
+class CurentTime extends StatefulWidget {
+  const CurentTime({super.key});
+
+  @override
+  State<CurentTime> createState() => _CurentTimeState();
+}
+
+class _CurentTimeState extends State<CurentTime> {
+  late final Timer timer;
+  DateTime currentTime = systemTime();
+
+  @override
+  void initState() {
+    super.initState();
+    timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        currentTime = systemTime();
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card.filled(
+      child: Padding(
+        padding: const EdgeInsets.all(padding12),
+        child: Wrap(
+          runAlignment: WrapAlignment.spaceBetween,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(padding16),
+              child: Text(
+                context.locale.current_time__local(time: '$currentTime'),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(padding16),
+              child: Text(
+                context.locale.current_time__utc(
+                  time: '${currentTime.toUtc()}',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,53 @@
+import 'package:clipboard/utils/clipboard_actions.dart';
+import 'package:clipboard/base/enums/clip_type.dart';
+import 'package:clipboard/base/l10n/l10n.dart';
+import 'package:clipboard/widgets/clip_item/clip_item_scope.dart';
+import 'package:flutter/material.dart';
+
+class SecondaryClipActionButton extends StatelessWidget {
+  const SecondaryClipActionButton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final item = ClipItemScope.of(context);
+    final action = switch (item.type) {
+      ClipItemType.url => IconButton(
+        onPressed: () => launchUrl(item),
+        icon: const Icon(Icons.outbound_rounded),
+        iconSize: 24,
+        tooltip: context.locale.app__follow_link,
+        style: IconButton.styleFrom(padding: EdgeInsets.zero),
+      ),
+      ClipItemType.file || ClipItemType.media =>
+        item.inCache
+            ? IconButton(
+                onPressed: () => openFile(item),
+                icon: const Icon(Icons.outbound_rounded),
+                iconSize: 24,
+                tooltip: context.locale.app__open_file,
+                style: IconButton.styleFrom(padding: EdgeInsets.zero),
+              )
+            : null,
+      ClipItemType.text => switch (item.textCategory) {
+        TextCategory.phone => IconButton(
+          onPressed: () => launchPhone(item, message: true),
+          icon: const Icon(Icons.outbound_rounded),
+          iconSize: 24,
+          tooltip: context.locale.app__send_message,
+          style: IconButton.styleFrom(padding: EdgeInsets.zero),
+        ),
+        TextCategory.email => IconButton(
+          onPressed: () => launchEmail(item),
+          icon: const Icon(Icons.outbound_rounded),
+          iconSize: 24,
+          tooltip: context.locale.app__send_email,
+          style: IconButton.styleFrom(padding: EdgeInsets.zero),
+        ),
+        _ => null,
+      },
+    };
+
+    if (action == null) return const SizedBox.shrink();
+    return SizedBox.square(dimension: 36, child: action);
+  }
+}

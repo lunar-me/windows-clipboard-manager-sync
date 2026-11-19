@@ -1,0 +1,92 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+**/build/**
+.history
+.svn/
+migrate_working_dir/
+**/scripts/temps/**
+*.dmg
+*.exe
+*.apk
+*.ipa
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+build_symbols
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+window_dist/installer.exe
+
+**/local/**
+
+**/private/**
+firebase.json
+
+**/secret/**
+
+packages/android_background_clipboard/*.md
+packages/launch_at_startup
+
+drizzle
+website
+
+
+# Fastlane
+**/fastlane/report.xml
+**/fastlane/Preview.html
+**/fastlane/README.md
+**/fastlane/screenshots/**/*.png
+
+# Fastlane iOS specific temporary files
+**/ios/.env
+**/ios/fastlane/report.xml
+**/ios/fastlane/Preview.html
+
+# Fastlane Android specific temporary files
+**/android/.env
+**/android/fastlane/report.xml
+**/android/fastlane/Preview.html
+
+# App Store & Google Play Private Signing Keys / Secrets
+*.jks
+*.keystore
+*.p8
+*.json
+!**/Contents.json
+!**/skills-lock.json
+.env*
+.github/workflows/release-macos-on-release-pr.yml
+CopyCat-*.zip
